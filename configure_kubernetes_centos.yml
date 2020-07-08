@@ -3,6 +3,8 @@
     hosts: kubes
     gather_facts: no
     become: yes
+    tags:
+    - user_config
     tasks:
     - name: Make sure we have a 'wheel' group
       group:
@@ -41,6 +43,8 @@
     hosts: kubes
     gather_facts: no
     become: yes
+    tags:
+      - se_linux_config
     tasks:
     - name: Disable SE Linux (1 of 2)
       selinux:
@@ -62,7 +66,10 @@
         - 10252/tcp
         - 10255/tcp
     - name: Enable bridge-netfilter
-      shell: modeprobe br_netfilter
+      modprobe: 
+        name: br_netfilter
+        state: present
+
     - name: Enable IPTables bridging
       shell: echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
 
@@ -70,21 +77,24 @@
     hosts: kubes
     gather_facts: no
     become: yes
+    tags:
+      - configure_all
     tasks:
+    - name: Add yum utils
+      yum:
+        name: yum-utils
+        state: latest
+        update_cache: yes
+
     - name: Add Docker repository
-      yum_repository:
-        name: Docker
-        baseurl: https://download.docker.com/linux/centos/docker-ce.repo
+      shell: yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 
     - name: Install Dependencies and Docker
       yum:
         name: "{{ item }}"
         state: latest
         update_cache: yes
-        force: yes
       loop:
-        - python-pip
-        - yum-utils
         - device-mapper-persistent-data
         - lvm2
         - docker
@@ -111,7 +121,8 @@
     hosts: kubes
     become: yes
     gather_facts: no
-
+    tags:
+      - configure_all
     tasks:
     - name: Add Kube Repository
       yum_repository:
@@ -120,13 +131,13 @@
         baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
         gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
         state: present
+        description: Kubernetes Repo
         
     - name: Install Docker and KubeAdm
       yum:
         update_cache: yes
         name: "{{item}}"
         state: latest
-        allow_unauthenticated: yes
       loop:
         - docker
         - kubeadm
