@@ -23,6 +23,19 @@
         shell: /bin/bash
         groups: wheel
         createhome: yes
+    
+    - name: Set authorized key for remote user
+      authorized_key:
+        user: lab
+        state: present
+        key: "{{ local_key }}"
+
+    - name: Disable password authentication for root
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
 
   - name: Disable SELinux enforcement
     hosts: kubes
