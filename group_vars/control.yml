@@ -1,0 +1,4 @@
+---
+healthbot_config: healthbot.conf
+ssl_key: ssl_key.key
+ssl_cert: ssl_cert.crt

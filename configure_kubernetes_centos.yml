@@ -1,0 +1,176 @@
+--- 
+  - name: Add lab user
+    hosts: kubes
+    gather_facts: no
+    become: yes
+    tasks:
+    - name: Make sure we have a 'wheel' group
+      group:
+        name: wheel
+        state: present
+
+    - name: Allow wheel to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+    - name: Create lab user
+      user:
+        name: lab
+        shell: /bin/bash
+        groups: wheel
+        createhome: yes
+
+  - name: Disable SELinux enforcement
+    hosts: kubes
+    gather_facts: no
+    become: yes
+    tasks:
+    - name: Disable SE Linux (1 of 2)
+      selinux:
+        state: disabled
+    - name: Disable SE Linux (2 of 2)
+      shell: sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+    - name: reboot
+      reboot:
+    - name: Configure firewall rules
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+      loop:
+        - 6443/tcp
+        - 2379-2380/tcp
+        - 10250/tcp
+        - 10251/tcp
+        - 10252/tcp
+        - 10255/tcp
+    - name: Enable bridge-netfilter
+      shell: modeprobe br_netfilter
+    - name: Enable IPTables bridging
+      shell: echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+
+  - name: Configure Docker
+    hosts: kubes
+    gather_facts: no
+    become: yes
+    tasks:
+    - name: Add Docker repository
+      yum_repository:
+        name: Docker
+        baseurl: https://download.docker.com/linux/centos/docker-ce.repo
+
+    - name: Install Dependencies and Docker
+      yum:
+        name: "{{ item }}"
+        state: latest
+        update_cache: yes
+        force: yes
+      loop:
+        - python-pip
+        - yum-utils
+        - device-mapper-persistent-data
+        - lvm2
+        - docker
+
+    - name: Set hostname
+      shell: echo {{ inventory_hostname}} > /etc/hostname  
+
+    - name: Disable SWAP since kubernetes can't work with swap enabled (1/2)
+      shell: swapoff -a
+
+    - name: Disable SWAP in fstab since kubernetes can't work with swap enabled (2/2)
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+        replace: '# \1'
+    
+    - name: Enable Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+  - name: Install Kube
+    hosts: kubes
+    become: yes
+    gather_facts: no
+
+    tasks:
+    - name: Add Kube Repository
+      yum_repository:
+        name: Kubernetes
+        gpgcheck: yes
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+        gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+        state: present
+        
+    - name: Install Docker and KubeAdm
+      yum:
+        update_cache: yes
+        name: "{{item}}"
+        state: latest
+        allow_unauthenticated: yes
+      loop:
+        - docker
+        - kubeadm
+        - kubelet
+        - kubectl
+      
+    - name: Enable Kubelet service
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+        
+  - name: Build the master node
+    hosts: k8s1
+    gather_facts: no
+    become: yes
+    tags:
+      - provision_master
+    tasks:
+    - name: Initialize the kubeadm master
+      shell: kubeadm init --apiserver-advertise-address={{api_server_advertise_address}} --pod-network-cidr=192.168.0.0/16
+      register: init_result
+
+    - name: Save token join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: Set token join command fact for later use
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+    - name: Enable non-root access (1 of 3)
+      file:
+        path: /home/lab/.kube
+        state: directory
+
+    - name: Enable non-root access (2 of 3)
+      copy:
+        remote_src: yes
+        src: /etc/kubernetes/admin.conf
+        dest: /home/lab/.kube/config
+
+    - name: Enable non-root access (3 of 3)
+      file:
+        path: /home/lab/.kube/config
+        owner: lab
+        group: wheel
+
+    - name: Apply Calico networking plugin
+      shell: kubectl apply -f https://docs.projectcalico.org/v3.11/manifests/calico.yaml --kubeconfig=/home/lab/.kube/config
+
+  - name: Join workers
+    hosts: workers
+    gather_facts: no
+    become: yes
+    tags:
+      - provision_workers
+    tasks:
+      - name: Join worker nodes
+        shell: "{{ hostvars['k8s1']['join_command'] }}"

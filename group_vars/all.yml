@@ -1,0 +1,11 @@
+---
+build_dir: configs
+vsphere_networks:
+  mgmt: VIRTUAL_2521
+  external: DEV_DESKTOP_MGMT
+  lan: VIRTUAL_2512
+vcenter_host: 10.210.39.12
+vcenter_username: jmckenzie
+vcenter_password: JGis#124
+healthbot_package: healthbot-2.1.0-1741-development-CD.deb
+ansible_python_interpreter: /usr/bin/python3
