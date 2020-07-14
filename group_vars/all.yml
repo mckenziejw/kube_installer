@@ -1,7 +1,7 @@
 ---
 build_dir: configs
-ansible_user: root
+ansible_user: lab
 ansible_python_interpreter: /usr/bin/python
-ansible_become_password: lab123
+#ansible_become_password: lab123
 user: lab
 local_key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_rsa.pub') }}"
