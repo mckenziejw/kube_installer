@@ -1,6 +1,39 @@
 --- 
+  - name: Add lab user
+    hosts: kubes
+    gather_facts: no
+    become: yes
+    tags:
+    - user_config
+    tasks:
+    - name: Make sure we have a 'wheel' group
+      group:
+        name: wheel
+        state: present
+
+    - name: Allow wheel to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+    - name: Create lab user
+      user:
+        name: lab
+        shell: /bin/bash
+        groups: wheel
+        createhome: yes
+    
+    - name: Set authorized key for remote user
+      authorized_key:
+        user: lab
+        state: present
+        key: "{{ local_key }}"
+
   - name: Setup routing for master
-    hosts: kube1
+    hosts: control
     gather_facts: no
     become: yes
     tasks:
@@ -50,8 +83,8 @@
       - colorama
       - pyyaml
 
-    - name: Set hostname
-      shell: echo {{ inventory_hostname}} > /etc/hostname
+#    - name: Set hostname
+#      shell: echo {{ inventory_hostname}} > /etc/hostname
         
     - name: Disable SWAP since kubernetes can't work with swap enabled (1/2)
       shell: swapoff -a
@@ -76,8 +109,8 @@
         - "https://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15/linux-headers-4.15.0-041500-generic_4.15.0-041500.201802011154_amd64.deb"
         - "https://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15/linux-image-4.15.0-041500-generic_4.15.0-041500.201802011154_amd64.deb"
     
-    - name: Upgrade the kernel (2 of 2)
-      reboot:
+#    - name: Upgrade the kernel (2 of 2)
+#      reboot:
     
     - name: Install Aptitude
       apt:
@@ -99,11 +132,11 @@
         - vsftpd
         - openssl
 
-    - name: install python libraries
-      pip:
-        name:
-          - pyvmomi
-          - requests
+ #   - name: install python libraries
+ #     pip:
+ #       name:
+ #         - pyvmomi
+ #         - requests
 
   - name: Install Docker + Kube
     hosts: kubes
@@ -146,68 +179,68 @@
     - name: Install kubelet, kubeadm and kubectl
       apt:
         name: "{{ item }}"
-        state: absent
+        state: latest
         update_cache: yes
       loop:
         - kubelet
         - kubeadm
         - kubectl
    
-  #   - name: Hold kube packages
-  #     dpkg_selections:
-  #       name: "{{ item }}"
-  #       selection: hold
-  #     loop:
-  #       - kubelet
-  #       - kubeadm
-  #       - kubectl
+    - name: Hold kube packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
 
-  # - name: Build the master node
-  #   hosts: kube1
-  #   gather_facts: no
-  #   become: yes
-  #   tags:
-  #     - provision_master
-  #   tasks:
-  #   - name: Initialize the kubeadm master
-  #     shell: kubeadm init --apiserver-advertise-address={{api_server_advertise_address}} --pod-network-cidr=192.168.0.0/16
-  #     register: init_result
+  - name: Build the master node
+    hosts: control
+    gather_facts: no
+    become: yes
+    tags:
+      - provision_master
+    tasks:
+    - name: Initialize the kubeadm master
+      shell: kubeadm init --apiserver-advertise-address={{api_server_advertise_address}} --pod-network-cidr=192.168.0.0/16
+      register: init_result
 
-  #   - name: Save token join command
-  #     shell: kubeadm token create --print-join-command
-  #     register: join_command_raw
+    - name: Save token join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
 
-  #   - name: Set token join command fact for later use
-  #     set_fact:
-  #       join_command: "{{ join_command_raw.stdout_lines[0] }}"
+    - name: Set token join command fact for later use
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
 
-  #   - name: Enable non-root access (1 of 3)
-  #     file:
-  #       path: /home/ubuntu/.kube
-  #       state: directory
+    - name: Enable non-root access (1 of 3)
+      file:
+        path: /home/lab/.kube
+        state: directory
 
-  #   - name: Enable non-root access (2 of 3)
-  #     copy:
-  #       remote_src: yes
-  #       src: /etc/kubernetes/admin.conf
-  #       dest: /home/ubuntu/.kube/config
+    - name: Enable non-root access (2 of 3)
+      copy:
+        remote_src: yes
+        src: /etc/kubernetes/admin.conf
+        dest: /home/lab/.kube/config
 
-  #   - name: Enable non-root access (3 of 3)
-  #     file:
-  #       path: /home/ubuntu/.kube/config
-  #       owner: ubuntu
-  #       group: ubuntu
+    - name: Enable non-root access (3 of 3)
+      file:
+        path: /home/ubuntu/.kube/config
+        owner: lab
+        group: lab
 
-  #   - name: Apply Calico networking plugin
-  #     shell: kubectl apply -f https://docs.projectcalico.org/v3.11/manifests/calico.yaml --kubeconfig=/home/ubuntu/.kube/config
+    - name: Apply Calico networking plugin
+      shell: kubectl apply -f https://docs.projectcalico.org/v3.11/manifests/calico.yaml --kubeconfig=/home/ubuntu/.kube/config
 
-  # - name: Join workers
-  #   hosts: workers
-  #   gather_facts: no
-  #   become: yes
-  #   tags:
-  #     - provision_workers
-  #     - provision_master
-  #   tasks:
-  #     - name: Join worker nodes
-  #       shell: "{{ hostvars['kube1']['join_command'] }}"
+  - name: Join workers
+    hosts: workers
+    gather_facts: no
+    become: yes
+    tags:
+      - provision_workers
+      - provision_master
+    tasks:
+      - name: Join worker nodes
+        shell: "{{ hostvars['k8s1']['join_command'] }}"
