@@ -36,6 +36,8 @@
     hosts: control
     gather_facts: no
     become: yes
+    tags:
+      - master_config
     tasks:
     - name: Add iptables-persistent
       apt:
@@ -57,6 +59,8 @@
     hosts: kubes
     gather_facts: no
     become: yes
+    tags:
+      - docker_config
     tasks:
     - name: Install Pip
       apt:
@@ -142,7 +146,8 @@
     hosts: kubes
     become: yes
     gather_facts: no
-
+    tags:
+      - kube_config
     tasks:
     - name: Add Docker Repository
       apt_repository:
@@ -200,7 +205,7 @@
     gather_facts: no
     become: yes
     tags:
-      - provision_master
+      - master_config
     tasks:
     - name: Initialize the kubeadm master
       shell: kubeadm init --apiserver-advertise-address={{api_server_advertise_address}} --pod-network-cidr=192.168.0.0/16
@@ -239,8 +244,31 @@
     gather_facts: no
     become: yes
     tags:
-      - provision_workers
-      - provision_master
+      - worker_config
+      - master_config
     tasks:
       - name: Join worker nodes
         shell: "{{ hostvars['k8s1']['join_command'] }}"
+      
+  - name: KVM Config
+    hosts: kubes
+    gather_facts: no
+    become: yes
+    tags:
+      - kvm_config
+    tasks:
+    - name: Install dependencies
+      apt:
+        name: "{{ item }}"
+        state: latest
+        update_cache: yes
+      loop:
+        - qemu-kvm
+        - libvirt-bin
+        - virtinst
+        - bridge-utils
+        - cpu-checker
+      
+  
+
+  
